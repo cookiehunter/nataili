@@ -55,13 +55,17 @@ class CFGMaskedDenoiser(nn.Module):
         super().__init__()
         self.inner_model = model
 
-    def forward(self, x, sigma, uncond, cond, cond_scale, mask, x0, xi):
+    def forward(self, x, sigma, i, uncond, cond, cond_scale, mask, x0, xi, step_mask, num_steps):
         x_in = x
         x_in = torch.cat([x_in] * 2)
         sigma_in = torch.cat([sigma] * 2)
         cond_in = torch.cat([uncond, cond])
         uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)
         denoised = uncond + (cond - uncond) * cond_scale
+
+        if step_mask is not None:
+            pixel_enabled = step_mask >= num_steps - i
+            denoised = (pixel_enabled * denoised) + (~pixel_enabled * xi)
 
         if mask is not None:
             assert x0 is not None
@@ -76,7 +80,7 @@ class CFGDenoiser(nn.Module):
         super().__init__()
         self.inner_model = model
 
-    def forward(self, x, sigma, uncond, cond, cond_scale):
+    def forward(self, x, sigma, i, uncond, cond, cond_scale):
         x_in = torch.cat([x] * 2)
         sigma_in = torch.cat([sigma] * 2)
         cond_in = torch.cat([uncond, cond])

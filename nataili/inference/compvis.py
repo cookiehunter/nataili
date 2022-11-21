@@ -90,6 +90,7 @@ class CompVis:
         save_grid: bool = True,
         ddim_eta: float = 0.0,
         sigma_override: dict = None,
+        denoise_mask=None,
     ):
         if init_img:
             init_img = resize_image(resize_mode, init_img, width, height)
@@ -108,6 +109,15 @@ class CompVis:
             init_mask = init_mask.convert("RGB")
             init_mask = resize_image(resize_mode, init_mask, width, height)
             init_mask = init_mask.convert("RGB")
+
+        if denoise_mask:
+            denoise_mask = resize_image(resize_mode, denoise_mask, width // 8, height // 8)
+            denoise_mask = np.asarray(denoise_mask)
+            if len(denoise_mask.shape) > 2:
+                denoise_mask = denoise_mask[:,:,0]
+            denoise_mask = denoise_mask.astype(np.float32) / 255.0
+            denoise_mask = np.tile(denoise_mask, (4, 1, 1))
+            denoise_mask = denoise_mask[None].transpose(0, 1, 2, 3)
 
         assert 0.0 <= denoising_strength <= 1.0, "can only work with strength in [0.0, 1.0]"
         t_enc = int(denoising_strength * ddim_steps)
@@ -188,20 +198,42 @@ class CompVis:
                 t_enc_steps = t_enc_steps - 1
                 obliterate = True
 
+            if denoise_mask is not None:
+                obliterate = False
+                t_enc_steps = ddim_steps - 1
+
             if sampler_name != "DDIM":
                 x0, z_mask = init_data
 
-                sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
-                noise = x * sigmas[ddim_steps - t_enc_steps - 1]
+                step_mask = None
 
-                xi = x0 + noise
+                if denoise_mask is not None:
+                    step_mask = denoise_mask * denoising_strength * ddim_steps
+                    step_mask = torch.tensor(step_mask, device=sampler.model.device)
+                    step_mask = step_mask.long()
+                    step_mask = step_mask.clip(0, ddim_steps)
+                    sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
+                    sigmas_nd = sigmas.gather(0, (ddim_steps - step_mask).flatten()).reshape(step_mask.shape)
+                    noise = x * sigmas_nd
+
+                    # denoise_mask_tensor = torch.tensor(denoise_mask, device=sampler.model.device)
+                    # xi = (denoise_mask_tensor * noise) + ((1 - denoise_mask_tensor) * x0)
+                    xi = x0 + noise
+                else:
+                    sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
+                    noise = x * sigmas[ddim_steps - t_enc_steps - 1]
+                    xi = x0 + noise
 
                 # Obliterate masked image
                 if z_mask is not None and obliterate:
                     random = torch.randn(z_mask.shape, device=xi.device)
                     xi = (z_mask * noise) + ((1 - z_mask) * xi)
 
-                sigma_sched = sigmas[ddim_steps - t_enc_steps - 1 :]
+                if denoise_mask is not None:
+                    sigma_sched = sigmas
+                else:
+                    sigma_sched = sigmas[ddim_steps - t_enc_steps - 1 :]
+
                 model_wrap_cfg = CFGMaskedDenoiser(sampler.model_wrap)
                 samples_ddim = K.sampling.__dict__[f"sample_{sampler.get_sampler_name()}"](
                     model_wrap_cfg,
@@ -214,6 +246,8 @@ class CompVis:
                         "mask": z_mask,
                         "x0": x0,
                         "xi": xi,
+                        "step_mask": step_mask,
+                        "num_steps" : ddim_steps,
                     },
                     disable=False,
                 )
