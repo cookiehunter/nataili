@@ -208,12 +208,13 @@ class CompVis:
                 step_mask = None
 
                 if denoise_mask is not None:
-                    step_mask = denoise_mask * denoising_strength * ddim_steps
+                    step_mask = denoise_mask * denoising_strength * (ddim_steps - 1)
                     step_mask = torch.tensor(step_mask, device=sampler.model.device)
                     step_mask = step_mask.long()
                     step_mask = step_mask.clip(0, ddim_steps)
+                    step_mask1 = (ddim_steps - step_mask - 1).clip(0, ddim_steps)
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
-                    sigmas_nd = sigmas.gather(0, (ddim_steps - step_mask).flatten()).reshape(step_mask.shape)
+                    sigmas_nd = sigmas.gather(0, step_mask1.flatten()).reshape(step_mask.shape)
                     noise = x * sigmas_nd
 
                     # denoise_mask_tensor = torch.tensor(denoise_mask, device=sampler.model.device)
