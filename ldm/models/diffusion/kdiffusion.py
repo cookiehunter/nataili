@@ -55,7 +55,7 @@ class CFGMaskedDenoiser(nn.Module):
         super().__init__()
         self.inner_model = model
 
-    def forward(self, x, sigma, i, uncond, cond, cond_scale, mask, x0, xi, step_mask, num_steps):
+    def forward(self, x, sigma, i, uncond, cond, cond_scale, mask, x0, xi, step_mask, num_steps, skip_steps):
         x_in = x
         x_in = torch.cat([x_in] * 2)
         sigma_in = torch.cat([sigma] * 2)
@@ -64,6 +64,7 @@ class CFGMaskedDenoiser(nn.Module):
         denoised = uncond + (cond - uncond) * cond_scale
 
         if step_mask is not None:
+            i += skip_steps
             pixel_enabled = step_mask >= num_steps - i
             denoised = (pixel_enabled * denoised) + (~pixel_enabled * xi)
 

@@ -48,8 +48,15 @@ class CompVis:
         filter_nsfw=False,
         safety_checker=None,
         disable_voodoo=False,
+        gpu_model=None,
     ):
-        self.model = model
+        if gpu_model is not None:
+            self.model = gpu_model
+            self.cpu_model = model
+        else:
+            self.model = model
+            self.cpu_model = None
+
         self.output_dir = output_dir
         self.output_file_path = output_file_path
         self.save_extension = save_extension
@@ -216,9 +223,8 @@ class CompVis:
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
                     sigmas_nd = sigmas.gather(0, step_mask1.flatten()).reshape(step_mask.shape)
                     noise = x * sigmas_nd
-
-                    # denoise_mask_tensor = torch.tensor(denoise_mask, device=sampler.model.device)
-                    # xi = (denoise_mask_tensor * noise) + ((1 - denoise_mask_tensor) * x0)
+                    max_steps = int(denoising_strength * (ddim_steps - 1))
+                    skip_steps = ddim_steps - max_steps
                     xi = x0 + noise
                 else:
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
@@ -231,7 +237,7 @@ class CompVis:
                     xi = (z_mask * noise) + ((1 - z_mask) * xi)
 
                 if denoise_mask is not None:
-                    sigma_sched = sigmas
+                    sigma_sched = sigmas[skip_steps:]
                 else:
                     sigma_sched = sigmas[ddim_steps - t_enc_steps - 1 :]
 
@@ -249,6 +255,7 @@ class CompVis:
                         "xi": xi,
                         "step_mask": step_mask,
                         "num_steps" : ddim_steps,
+                        "skip_steps" : skip_steps
                     },
                     disable=False,
                 )
@@ -402,7 +409,12 @@ class CompVis:
                             )
                         )
 
-                        x_samples_ddim = model.decode_first_stage(samples_ddim)
+                        if self.cpu_model is not None:
+                            samples_ddim = samples_ddim.to(self.cpu_model.device)
+                            x_samples_ddim = self.cpu_model.decode_first_stage(samples_ddim)
+                        else:
+                            x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+
                         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
         else:
@@ -488,7 +500,12 @@ class CompVis:
                         )
                     )
 
-                    x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+                    if self.cpu_model is not None:
+                        samples_ddim = samples_ddim.to(self.cpu_model.device)
+                        x_samples_ddim = self.cpu_model.decode_first_stage(samples_ddim)
+                    else:
+                        x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+                        
                     x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
         for i, x_sample in enumerate(x_samples_ddim):
