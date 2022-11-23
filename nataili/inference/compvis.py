@@ -230,6 +230,7 @@ class CompVis:
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
                     noise = x * sigmas[ddim_steps - t_enc_steps - 1]
                     xi = x0 + noise
+                    skip_steps = 0
 
                 # Obliterate masked image
                 if z_mask is not None and obliterate:
