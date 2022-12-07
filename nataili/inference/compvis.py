@@ -207,7 +207,6 @@ class CompVis:
 
             if denoise_mask is not None:
                 obliterate = False
-                t_enc_steps = ddim_steps - 1
 
             if sampler_name != "DDIM":
                 x0, z_mask = init_data
@@ -215,16 +214,14 @@ class CompVis:
                 step_mask = None
 
                 if denoise_mask is not None:
-                    step_mask = denoise_mask * denoising_strength * (ddim_steps - 1)
+                    step_mask = denoise_mask * t_enc_steps
                     step_mask = torch.tensor(step_mask, device=sampler.model.device)
                     step_mask = step_mask.long()
-                    step_mask = step_mask.clip(0, ddim_steps)
-                    step_mask1 = (ddim_steps - step_mask - 1).clip(0, ddim_steps)
+                    step_mask1 = ddim_steps - step_mask - 1
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
                     sigmas_nd = sigmas.gather(0, step_mask1.flatten()).reshape(step_mask.shape)
                     noise = x * sigmas_nd
-                    max_steps = int(denoising_strength * (ddim_steps - 1))
-                    skip_steps = ddim_steps - max_steps
+                    skip_steps = ddim_steps - t_enc_steps - 1
                     xi = x0 + noise
                 else:
                     sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
