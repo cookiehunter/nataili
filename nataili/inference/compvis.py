@@ -200,44 +200,30 @@ class CompVis:
         def sample_img2img(init_data, x, conditioning, unconditional_conditioning, sampler_name):
             nonlocal sampler
             t_enc_steps = t_enc
-            obliterate = False
-            if ddim_steps == t_enc_steps:
-                t_enc_steps = t_enc_steps - 1
-                obliterate = True
-
-            if denoise_mask is not None:
-                obliterate = False
 
             if sampler_name != "DDIM":
                 x0, z_mask = init_data
 
-                step_mask = None
+                skip_steps = ddim_steps - t_enc
+                sigmas = self.sampler.model_wrap.get_sigmas(ddim_steps)
+                sigma_sched = sigmas[skip_steps:]
 
+                randoms = create_random_tensors(shape, seeds=seeds, device=self.model.device)
+
+                # add noise to image
                 if denoise_mask is not None:
-                    step_mask = denoise_mask * t_enc_steps
-                    step_mask = torch.tensor(step_mask, device=sampler.model.device)
+                    step_mask = denoise_mask * t_enc
+                    step_mask = torch.tensor(step_mask, device=self.model.device)
                     step_mask = step_mask.long()
-                    step_mask1 = ddim_steps - step_mask - 1
-                    sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
-                    sigmas_nd = sigmas.gather(0, step_mask1.flatten()).reshape(step_mask.shape)
-                    noise = x * sigmas_nd
-                    skip_steps = ddim_steps - t_enc_steps - 1
+                    step_mask = t_enc - step_mask
+                    sigmas_nd = sigmas.gather(0, step_mask.flatten()).reshape(step_mask.shape)
+                    noise = randoms * sigmas_nd
                     xi = x0 + noise
                 else:
-                    sigmas = sampler.model_wrap.get_sigmas(ddim_steps)
-                    noise = x * sigmas[ddim_steps - t_enc_steps - 1]
+                    step_mask = None
+                    sigmas_nd = sigmas[skip_steps]
+                    noise = randoms * sigmas_nd
                     xi = x0 + noise
-                    skip_steps = 0
-
-                # Obliterate masked image
-                if z_mask is not None and obliterate:
-                    random = torch.randn(z_mask.shape, device=xi.device)
-                    xi = (z_mask * noise) + ((1 - z_mask) * xi)
-
-                if denoise_mask is not None:
-                    sigma_sched = sigmas[skip_steps:]
-                else:
-                    sigma_sched = sigmas[ddim_steps - t_enc_steps - 1 :]
 
                 model_wrap_cfg = CFGMaskedDenoiser(sampler.model_wrap)
                 samples_ddim = K.sampling.__dict__[f"sample_{sampler.get_sampler_name()}"](
@@ -250,10 +236,7 @@ class CompVis:
                         "cond_scale": cfg_scale,
                         "mask": z_mask,
                         "x0": x0,
-                        "xi": xi,
-                        "step_mask": step_mask,
-                        "num_steps" : ddim_steps,
-                        "skip_steps" : skip_steps
+                        "xi": xi
                     },
                     disable=False,
                 )
@@ -266,11 +249,6 @@ class CompVis:
                     x0,
                     torch.tensor([t_enc_steps] * batch_size).to(self.model.device),
                 )
-
-                # Obliterate masked image
-                if z_mask is not None and obliterate:
-                    random = torch.randn(z_mask.shape, device=z_enc.device)
-                    z_enc = (z_mask * random) + ((1 - z_mask) * z_enc)
 
                     # decode it
                 samples_ddim = sampler.decode(
