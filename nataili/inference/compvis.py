@@ -215,8 +215,9 @@ class CompVis:
                     step_mask = denoise_mask * t_enc
                     step_mask = torch.tensor(step_mask, device=self.model.device)
                     step_mask = step_mask.long()
+                    skip_steps_nd = ddim_steps - step_mask
                     step_mask = t_enc - step_mask
-                    sigmas_nd = sigmas.gather(0, step_mask.flatten()).reshape(step_mask.shape)
+                    sigmas_nd = sigmas.gather(0, skip_steps_nd.flatten()).reshape(step_mask.shape)
                     noise = randoms * sigmas_nd
                     xi = x0 + noise
                 else:
